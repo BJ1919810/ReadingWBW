@@ -39,12 +39,41 @@ def load_audio(path, target_sr=None):
     return data.astype(np.float64), sr
 
 
+def to_pcm16(data):
+    """浮点样本 -> 16-bit 有符号小端 PCM 字节。
+
+    必须转！pygame.mixer.Sound(buffer=...) 收的是【mixer 格式】的原始 PCM 字节，
+    本项目 mixer 是 16-bit 有符号单声道。
+    直接把 float32 的 tobytes() 塞进去，会被当成 int16 解释 ——
+    采样点错位、幅度失真，听起来就是"全损音质"的噪声。
+    """
+    a = np.clip(np.asarray(data, dtype=np.float32), -1.0, 1.0)
+    return (a * 32767.0).astype('<i2').tobytes()
+
+
 def load_sound_bytes(path, target_sr=SAMPLE_RATE):
-    """读音频 -> (bytes, 采样率)，直接交给 pygame 播放"""
+    """读音频 -> (16-bit PCM 字节, 采样率)，直接交给 pygame 播放"""
     data, sr = sf.read(path, dtype='float32')
     data = to_mono(data)
     data, sr = resample(data, sr, target_sr)
-    return data.tobytes(), sr
+    return to_pcm16(data), sr
+
+
+def verify_pcm_roundtrip(path, target_sr=SAMPLE_RATE):
+    """自检：把送进 mixer 的字节解回来，和源文件逐样本比。
+
+    返回 (最大误差, 是否通过)。这是防"把 float32 字节当 int16 送进 mixer"
+    那类位深错位的护栏 —— 错位时程序不报任何错，只是声音变成噪声。
+    """
+    raw, sr = load_sound_bytes(path, target_sr)
+    back = np.frombuffer(raw, dtype='<i2').astype(np.float32) / 32767.0
+    src, _ = load_audio(path, target_sr=sr)
+    src = np.clip(src, -1.0, 1.0)
+    m = min(len(back), len(src))
+    if m < 100:
+        return 0.0, True
+    err = float(np.max(np.abs(back[:m] - src[:m])))
+    return err, err <= 1e-3
 
 
 def save_audio(path, data, sr):

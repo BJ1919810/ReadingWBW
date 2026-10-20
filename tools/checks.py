@@ -279,6 +279,38 @@ def check_phoneme(min_pct=99.0):
             '阈值 ≥%.0f%%；关闭开关即回滚' % min_pct)
 
 
+def check_playback_fidelity(max_err=1e-3):
+    """播放保真：把 mixer 实际收到的字节解回来，和源文件逐样本比。
+
+    这项检查是为了防住"把 float32 字节当成 int16 送进 mixer"这种错位 ——
+    位深一错，听感就是"全损音质"的纯噪声，但程序不会报任何错。
+    """
+    import numpy as np
+    from voice_reader.audio_io import load_sound_bytes, load_audio
+    pdir = paths.pack_dir(PACK)
+    names = [f[:-4] for f in sorted(os.listdir(pdir))
+             if f.endswith('.ogg') and not f.startswith('空')][:20]
+    worst = 0.0
+    for n in names:
+        p = os.path.join(pdir, n + '.ogg')
+        try:
+            raw, sr = load_sound_bytes(p)
+            back = np.frombuffer(raw, dtype='<i2').astype(np.float32) / 32767.0
+            # 参照也要同样重采样 + 同样削波，否则比的是两回事
+            src, _ = load_audio(p, target_sr=sr)
+            src = np.clip(src, -1.0, 1.0)
+        except Exception as exc:
+            return ('播放保真', False, '读取失败: %s' % exc, '')
+        m = min(len(back), len(src))
+        if m < 100:
+            continue
+        err = float(np.max(np.abs(back[:m] - src[:m])))
+        worst = max(worst, err)
+    ok = worst <= max_err
+    return ('播放保真', ok, '最大样本误差 %.2e (阈值 %.0e)' % (worst, max_err),
+            'mixer 收到的是 16-bit PCM；位深错位会立刻爆表')
+
+
 ALL_CHECKS = [
     ('模块导入', check_imports),
     ('静态检查', check_lint),
@@ -287,5 +319,6 @@ ALL_CHECKS = [
     ('声调准确率', check_tone),
     ('响度一致性', check_loudness),
     ('音素级补齐', check_phoneme),
+    ('播放保真', check_playback_fidelity),
     ('稳定性', check_stability),
 ]

@@ -34,7 +34,8 @@ class PlaybackStopped(Exception):
 class Player:
     """把文本读出来。"""
 
-    def __init__(self, pack_name, on_progress=None, on_log=None, use_phoneme=None):
+    def __init__(self, pack_name, on_progress=None, on_log=None,
+                 use_phoneme=None, capture=False):
         self.index = AssetIndex(pack_name, use_phoneme=use_phoneme)
         self.phrases = PhraseIndex(self.index.phrases.keys())
         self.on_progress = on_progress
@@ -45,6 +46,10 @@ class Player:
         self.missing = set()
         self.recovered = set()
         self.error = None      # 朗读过程中的异常，供界面显示
+        # capture 模式：走完全相同的音频链路，但不送声卡，
+        # 而是把送进去的 PCM 收集起来 —— 用来验证"实际会播什么"
+        self.capture = capture
+        self.captured = []
 
     # ---------- 生命周期 ----------
     def start(self, text, text_path=None):
@@ -185,6 +190,10 @@ class Player:
 
     # ---------- 播放 ----------
     def _play(self, data, sr):
+        if self.capture:
+            # 不送声卡，但走的是同一条路：data 就是送进 mixer 的 PCM 字节
+            self.captured.append((data, sr))
+            return
         pygame = self._pygame
         snd = pygame.mixer.Sound(buffer=data)
         ch = snd.play()

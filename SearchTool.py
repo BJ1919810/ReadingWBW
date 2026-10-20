@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from voice_reader import paths
 from voice_reader.assets import AssetIndex
-from voice_reader.audio_io import load_audio
+from voice_reader.audio_io import load_audio, to_pcm16
 from voice_reader.pinyin_map import (load_wtv_map, load_overrides, convert_to_pinyin)
 
 
@@ -30,7 +30,8 @@ def play(path):
         pygame.mixer.pre_init(48000, -16, 1, 512)
         pygame.init()
         data, sr = load_audio(path, target_sr=48000)
-        snd = pygame.mixer.Sound(buffer=data.astype('float32').tobytes())
+        # 必须是 16-bit PCM：mixer 收的是它自己格式的原始字节
+        snd = pygame.mixer.Sound(buffer=to_pcm16(data))
         snd.play()
         import time
         time.sleep(snd.get_length())

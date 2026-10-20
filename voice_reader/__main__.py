@@ -65,6 +65,22 @@ def _check(report_path=None):
         except Exception as exc:
             item('包 %s' % p, False, '加载失败: %s' % exc)
 
+    # 播放保真：送进 mixer 的字节必须是 16-bit PCM。
+    # 位深错位时程序不会报错，只是声音变成噪声 —— 打包后更要自己验自己。
+    try:
+        from voice_reader.audio_io import verify_pcm_roundtrip
+        worst = 0.0
+        for p in packs:
+            d = paths.pack_dir(p)
+            names = [f[:-4] for f in sorted(os.listdir(d))
+                     if f.endswith('.ogg')][:20]
+            for n in names:
+                e, _ = verify_pcm_roundtrip(os.path.join(d, n + '.ogg'))
+                worst = max(worst, e)
+        item('播放保真', worst <= 1e-3, '最大样本误差 %.2e' % worst)
+    except Exception as exc:
+        item('播放保真', False, '校验失败: %s' % exc)
+
     try:
         wtv = load_wtv_map()
         ov = load_overrides()
@@ -140,6 +156,41 @@ def _play(path, report_path=None):
     return 0 if ok else 1
 
 
+def _render(path, out_path):
+    """把"实际会送进声卡的 PCM"渲染成 wav。
+
+    走的是和真实播放完全相同的链路（同一套 token 切分、同一套
+    load_sound_bytes、同样送进 mixer 的字节），只是不送声卡而是落盘 ——
+    这样就能直接听到程序真正会播出什么。
+    """
+    import numpy as np
+    import soundfile as sf
+    from voice_reader import paths
+    from voice_reader.pinyin_map import detect_encoding
+    from voice_reader.player import Player
+
+    text, enc = detect_encoding(path)
+    packs = paths.available_packs()
+    if not packs:
+        print('没有可用语音包')
+        return 1
+    p = Player(packs[0], capture=True)
+    p.start(text, path)
+    p.join(timeout=300)
+    if p.error is not None:
+        print('朗读异常：%s' % p.error)
+        return 1
+    chunks = [np.frombuffer(d, dtype='<i2') for d, _ in p.captured]
+    if not chunks:
+        print('没有捕获到音频')
+        return 1
+    g = np.concatenate(chunks).astype(np.float32) / 32767.0
+    sf.write(out_path, g, 48000)
+    print('  已渲染 %s  %.1fs  未收录 %d 个音节'
+          % (os.path.basename(out_path), len(g) / 48000, len(p.missing)))
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv if argv is None else argv)
     report = None
@@ -150,6 +201,12 @@ def main(argv=None):
     try:
         if '--check' in argv:
             return _check(report)
+        if '--render' in argv:
+            i = argv.index('--render')
+            if i + 2 < len(argv):
+                return _render(argv[i + 1], argv[i + 2])
+            print('--render 需要 <txt> <输出wav> 两个参数')
+            return 2
         if '--play' in argv:
             i = argv.index('--play')
             if i + 1 < len(argv):
