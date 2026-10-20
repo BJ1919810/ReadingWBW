@@ -10,6 +10,14 @@ __pycache__/
 # 试听产物，用 python tools/final_demo.py 重新生成
 demo/
 
+# 打包中间产物与产物
+build/
+dist/
+
 # 临时文件
 *.tmp
 *.bak
+
+# 语音包里的原始素材（切音节用的源料，140MB，含第三方下载音频）。
+# 本地保留即可，不入库也不打进 exe。
+VoicesPackages/*/待切/

@@ -206,14 +206,24 @@ class Player:
 
 
 def _init_pygame():
+    """只初始化 mixer。
+
+    不要用 pygame.init() —— 它会把所有模块都初始化，包括 display（建窗口），
+    而这个程序的界面是 tkinter，pygame 根本不需要 display。
+    在打包成窗口程序后，display 初始化会卡住整个进程。
+    """
     import pygame
     try:
         pygame.mixer.pre_init(SAMPLE_RATE, -16, 1, CHUNK)
     except Exception:
         pass
-    pygame.init()
     if not pygame.mixer.get_init():
-        raise RuntimeError('pygame 音频设备初始化失败')
+        try:
+            pygame.mixer.init(SAMPLE_RATE, -16, 1, CHUNK)
+        except Exception as exc:
+            raise RuntimeError('音频设备初始化失败：%s' % exc)
+    if not pygame.mixer.get_init():
+        raise RuntimeError('音频设备初始化失败')
     return pygame
 
 

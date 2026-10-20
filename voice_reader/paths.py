@@ -17,10 +17,20 @@ def _base_dir():
         return sys._MEIPASS
     return ROOT
 
-BASE_DIR = _base_dir()
+
+def _user_dir():
+    """可写目录。冻结后 BASE_DIR 是临时解包目录（退出即清空），
+    缓存不能写在那里，要写到 exe 所在目录。"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return ROOT
+
+
+BASE_DIR = _base_dir()      # 随包分发的只读资源
+USER_DIR = _user_dir()      # 可写目录（缓存等）
 
 VOICE_PACKS_DIR = os.path.join(BASE_DIR, 'VoicesPackages')
-CACHE_DIR = os.path.join(BASE_DIR, '.cache')
+CACHE_DIR = os.path.join(USER_DIR, '.cache')
 WTV_DATA = os.path.join(BASE_DIR, 'WTV.data')
 PRONUNCIATIONS = os.path.join(BASE_DIR, 'pronunciations.json')
 
