@@ -34,8 +34,8 @@ class PlaybackStopped(Exception):
 class Player:
     """把文本读出来。"""
 
-    def __init__(self, pack_name, on_progress=None, on_log=None):
-        self.index = AssetIndex(pack_name)
+    def __init__(self, pack_name, on_progress=None, on_log=None, use_phoneme=None):
+        self.index = AssetIndex(pack_name, use_phoneme=use_phoneme)
         self.phrases = PhraseIndex(self.index.phrases.keys())
         self.on_progress = on_progress
         self.on_log = on_log

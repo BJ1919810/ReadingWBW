@@ -241,6 +241,44 @@ def check_imports():
 
 # ---------------------------------------------------------------- 汇总
 
+def check_phoneme(min_pct=99.0):
+    """音素级移植层：开启后覆盖率应显著提升；关闭后行为应与之前完全一致。"""
+    from voice_reader.assets import AssetIndex
+    wtv = load_wtv_map()
+    ov = load_overrides()
+
+    def cov(use_phoneme):
+        index = AssetIndex(PACK, use_phoneme=use_phoneme)
+        ph = PhraseIndex(index.phrases.keys())
+        pcts = []
+        for name in NOVELS:
+            p = os.path.join(paths.ROOT, name)
+            if not os.path.exists(p):
+                continue
+            text, _ = detect_encoding(p)
+            py = convert_to_pinyin(text, wtv, None, ov)
+            hit = tot = 0
+            for kind, key, alt in ph.iter_tokens(text, py, wtv):
+                if kind != 'char':
+                    continue
+                tot += 1
+                if index.has(key) or (alt and index.has(alt)):
+                    hit += 1
+            if tot:
+                pcts.append(100.0 * hit / tot)
+        return index, (min(pcts) if pcts else 0.0)
+
+    idx_off, pct_off = cov(False)
+    idx_on, pct_on = cov(True)
+    if len(idx_on.phoneme) == 0:
+        return ('音素级补齐', False, '音素层是空的',
+                '跑 python tools/build_phoneme.py %s 生成' % PACK)
+    ok = pct_on >= min_pct and pct_on > pct_off
+    return ('音素级补齐', ok, '开 %d 个音节，覆盖 %.1f%% -> %.1f%%'
+            % (len(idx_on.phoneme), pct_off, pct_on),
+            '阈值 ≥%.0f%%；关闭开关即回滚' % min_pct)
+
+
 ALL_CHECKS = [
     ('模块导入', check_imports),
     ('静态检查', check_lint),
@@ -248,5 +286,6 @@ ALL_CHECKS = [
     ('融合度', check_blend),
     ('声调准确率', check_tone),
     ('响度一致性', check_loudness),
+    ('音素级补齐', check_phoneme),
     ('稳定性', check_stability),
 ]

@@ -48,6 +48,9 @@ class ReaderApp:
         ttk.Button(top, text='停止', command=self.stop).pack(side='right', padx=6)
         self.start_btn = ttk.Button(top, text='开始朗读', command=self.start)
         self.start_btn.pack(side='right')
+        self.phoneme_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top, text='音素级补齐(实验)',
+                        variable=self.phoneme_var).pack(side='left', padx=(12, 0))
 
         self.file_var = tk.StringVar(value='未选择文件')
         ttk.Label(self.root, textvariable=self.file_var, padding=(10, 0)).pack(fill='x')
@@ -113,7 +116,8 @@ class ReaderApp:
         self._user_stopped = False
 
         self.player = Player(pack, on_progress=self._on_progress,
-                             on_log=self._on_log)
+                             on_log=self._on_log,
+                             use_phoneme=self.phoneme_var.get())
         try:
             self.player.start(text, self.current_path)
         except Exception as exc:

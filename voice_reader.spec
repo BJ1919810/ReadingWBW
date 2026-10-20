@@ -38,7 +38,8 @@ for pack in sorted(os.listdir(PACKS)) if os.path.isdir(PACKS) else []:
         full = os.path.join(pdir, name)
         if os.path.isfile(full) and name.endswith(('.ogg', '.json')):
             datas.append((full, rel))
-        elif os.path.isdir(full) and name in ('phrases', '_generated'):
+        elif os.path.isdir(full) and name in ('phrases', '_generated',
+                                              '_generated_phoneme'):
             datas.append((full, '%s/%s' % (rel, name)))
 
 # ---- 运行时用不到的，直接排除 ----

@@ -38,6 +38,13 @@ PRONUNCIATIONS = os.path.join(BASE_DIR, 'pronunciations.json')
 GENERATED_DIR = '_generated'      # 离线补齐的音节放这里
 ASSET_MANIFEST = 'assets.json'    # 补齐清单 + 统计
 PHRASES_DIR = 'phrases'            # 词组录音子目录
+
+# 音素级移植层（独立目录 + 独立清单，默认不启用）
+# 启用方式：环境变量 READINGWBW_USE_PHONEME=1，或界面上的开关
+# 回滚方式：去掉开关即可，删掉这两个目录也完全不影响现有功能
+PHONEME_DIR = '_generated_phoneme'
+PHONEME_MANIFEST = 'assets_phoneme.json'
+USE_PHONEME_ENV = 'READINGWBW_USE_PHONEME'
 SILENCE_NAME = '空'                # 静默兜底录音
 
 # 兼容旧版把数据放在 cwd 的情况
