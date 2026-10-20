@@ -32,7 +32,9 @@ def _check(report_path=None):
         if not good:
             ok = False
 
-    item('资源根目录', os.path.isdir(paths.BASE_DIR), paths.BASE_DIR)
+    item('资源目录', os.path.isdir(paths.BASE_DIR), paths.BASE_DIR)
+    # 打包后资源在临时解包目录里，程序/小说在 exe 旁边，别混淆
+    item('程序目录', os.path.isdir(paths.USER_DIR), paths.USER_DIR)
     item('WTV.data', os.path.exists(paths.WTV_DATA), paths.WTV_DATA)
     item('读音表', os.path.exists(paths.PRONUNCIATIONS), paths.PRONUNCIATIONS)
 

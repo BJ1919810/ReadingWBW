@@ -83,10 +83,17 @@ class ReaderApp:
         self.file_var.set(os.path.basename(path))
 
     def _last_dir(self):
-        """默认打开上次用过的目录；没有就用项目根目录"""
+        r"""文件对话框的默认目录。
+
+        用 USER_DIR（程序所在目录），不是 BASE_DIR ——
+        打包成 exe 后 BASE_DIR 是临时解包目录（AppData\Local\Temp\_MEIxxxx），
+        弹出来是个用不了的临时文件夹。小说 txt 就在 exe 旁边，
+        默认打开那里才对。
+        """
         if self.current_path and os.path.isdir(os.path.dirname(self.current_path)):
             return os.path.dirname(self.current_path)
-        return paths.BASE_DIR
+        d = paths.USER_DIR
+        return d if os.path.isdir(d) else os.getcwd()
 
     def start(self):
         if self.player and self.player.running:
