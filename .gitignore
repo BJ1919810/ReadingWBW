@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# 运行时缓存（拼音转写缓存、声调模板缓存），可随时重建
+.cache/
+
+# 试听产物，用 python tools/final_demo.py 重新生成
+demo/
+
+# 临时文件
+*.tmp
+*.bak
