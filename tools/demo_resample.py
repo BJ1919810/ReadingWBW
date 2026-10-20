@@ -12,7 +12,7 @@ import soundfile as sf
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from voice_reader import paths                                  # noqa: E402
-from voice_reader.audio_io import load_audio, to_pcm16, to_mono  # noqa: E402
+from voice_reader.audio_io import load_audio, to_mono  # noqa: E402
 from voice_reader.assets import AssetIndex                    # noqa: E402
 from voice_reader.pinyin_map import (PhraseIndex, load_wtv_map,  # noqa: E402
                                      load_overrides, convert_to_pinyin,

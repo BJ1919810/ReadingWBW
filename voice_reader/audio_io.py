@@ -89,7 +89,7 @@ def load_audio(path, target_sr=None):
 
 
 def to_pcm16(data):
-    """浮点样本 -> 16-bit 有符号小端 PCM 字节。
+    """浮点样本 -> 16-bit 有符号小端 PCM 字节（单声道）。
 
     必须转！pygame.mixer.Sound(buffer=...) 收的是【mixer 格式】的原始 PCM 字节，
     本项目 mixer 是 16-bit 有符号单声道。
@@ -100,12 +100,27 @@ def to_pcm16(data):
     return (a * 32767.0).astype('<i2').tobytes()
 
 
-def load_sound_bytes(path, target_sr=SAMPLE_RATE):
-    """读音频 -> (16-bit PCM 字节, 采样率)，直接交给 pygame 播放"""
+def to_mixer_pcm(data, channels=1):
+    """浮点样本 -> mixer 格式的 int16 字节，按 mixer 的实际声道数交织。
+
+    坑：pygame.mixer.init(48000, -16, 1, 512) 明明要求单声道，
+    实际拿到的却是 (48000, -16, 2) —— 设备原生是立体声，SDL 不改声道数。
+    把单声道数据喂进立体声 mixer，它会被当成 L/R 交替采样，
+    播放速度直接翻倍：音调高八度（"尖细"）+ 时长减半（"短促"）。
+    所以必须按 mixer 的实际声道数来交织。
+    """
+    a = np.clip(np.asarray(data, dtype=np.float32), -1.0, 1.0)
+    if channels and channels > 1:
+        a = np.repeat(a, channels)      # 单声道 -> 多声道，各声道相同
+    return (a * 32767.0).astype('<i2').tobytes()
+
+
+def load_sound_bytes(path, target_sr=SAMPLE_RATE, channels=1):
+    """读音频 -> (mixer 格式 PCM 字节, 采样率)，直接交给 pygame 播放"""
     data, sr = sf.read(path, dtype='float32')
     data = to_mono(data)
     data, sr = resample(data, sr, target_sr)
-    return to_pcm16(data), sr
+    return to_mixer_pcm(data, channels), sr
 
 
 def verify_pcm_roundtrip(path, target_sr=SAMPLE_RATE):

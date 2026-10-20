@@ -180,14 +180,23 @@ def _render(path, out_path):
     if p.error is not None:
         print('朗读异常：%s' % p.error)
         return 1
-    chunks = [np.frombuffer(d, dtype='<i2') for d, _ in p.captured]
+    chunks = []
+    channels = 1
+    for d, sr, ch in p.captured:
+        channels = ch
+        chunks.append(np.frombuffer(d, dtype='<i2'))
     if not chunks:
         print('没有捕获到音频')
         return 1
-    g = np.concatenate(chunks).astype(np.float32) / 32767.0
-    sf.write(out_path, g, 48000)
-    print('  已渲染 %s  %.1fs  未收录 %d 个音节'
-          % (os.path.basename(out_path), len(g) / 48000, len(p.missing)))
+    samples = np.concatenate(chunks).astype(np.float32) / 32767.0
+    # mixer 的字节是按声道交织的，写 wav 时要还原成 (帧, 声道)
+    if channels > 1:
+        usable = (len(samples) // channels) * channels
+        samples = samples[:usable].reshape(-1, channels)
+    sf.write(out_path, samples, 48000)
+    print('  已渲染 %s  %.1fs  %dch  未收录 %d 个音节'
+          % (os.path.basename(out_path), len(samples) / 48000,
+             channels, len(p.missing)))
     return 0
 
 

@@ -46,6 +46,10 @@ class Player:
         self.missing = set()
         self.recovered = set()
         self.error = None      # 朗读过程中的异常，供界面显示
+        # mixer 的实际格式（运行时从 pygame.mixer.get_init() 读出来）
+        self._mixer_rate = SAMPLE_RATE
+        self._mixer_bits = -16
+        self._mixer_channels = 1
         # capture 模式：走完全相同的音频链路，但不送声卡，
         # 而是把送进去的 PCM 收集起来 —— 用来验证"实际会播什么"
         self.capture = capture
@@ -88,6 +92,11 @@ class Player:
             self.error = exc
             self._log('音频设备初始化失败：%s' % exc)
             return
+        # mixer 的【实际】格式。声道数尤其重要：不能想当然用 1，
+        # 设备原生立体声时会把单声道数据当成 L/R 交替 -> 速度翻倍。
+        fmt = self._pygame.mixer.get_init()
+        self._mixer_rate, self._mixer_bits, self._mixer_channels = fmt
+        self._log('音频格式 %dHz/%dbit/%dch' % fmt)
 
         wtv = load_wtv_map()
         overrides = load_overrides()
@@ -136,7 +145,8 @@ class Player:
                                 break
                             continue
                     try:
-                        data, sr = load_sound_bytes(path)
+                        data, sr = load_sound_bytes(path, self._mixer_rate,
+                                                   self._mixer_channels)
                     except Exception:
                         if not _put(q, ('pause', 0.08, None, 0), stop):
                             break
@@ -192,7 +202,7 @@ class Player:
     def _play(self, data, sr):
         if self.capture:
             # 不送声卡，但走的是同一条路：data 就是送进 mixer 的 PCM 字节
-            self.captured.append((data, sr))
+            self.captured.append((data, sr, self._mixer_channels))
             return
         pygame = self._pygame
         snd = pygame.mixer.Sound(buffer=data)
@@ -215,11 +225,17 @@ class Player:
 
 
 def _init_pygame():
-    """只初始化 mixer。
+    """只初始化 mixer，并记住 mixer 的【实际】格式。
 
-    不要用 pygame.init() —— 它会把所有模块都初始化，包括 display（建窗口），
-    而这个程序的界面是 tkinter，pygame 根本不需要 display。
-    在打包成窗口程序后，display 初始化会卡住整个进程。
+    两个坑：
+    1) 不要用 pygame.init() —— 它会把所有模块都初始化，包括 display（建窗口），
+       而这个程序的界面是 tkinter，pygame 根本不需要 display。
+       在打包成窗口程序后，display 初始化会卡住整个进程。
+    2) init 时要求的声道数不一定算数：设备原生是立体声时，
+       init(48000, -16, 1, 512) 拿回来的仍是 (48000, -16, 2)。
+       单声道数据喂进立体声 mixer 会被当成 L/R 交替，
+       播放速度翻倍 —— 听感是"尖细"+"短促"。
+       所以要用 get_init() 的实际返回值，不能用请求值。
     """
     import pygame
     try:
@@ -231,8 +247,12 @@ def _init_pygame():
             pygame.mixer.init(SAMPLE_RATE, -16, 1, CHUNK)
         except Exception as exc:
             raise RuntimeError('音频设备初始化失败：%s' % exc)
-    if not pygame.mixer.get_init():
+    fmt = pygame.mixer.get_init()
+    if not fmt:
         raise RuntimeError('音频设备初始化失败')
+    if fmt[2] < 1:
+        raise RuntimeError('音频设备返回了异常的声道数：%s' % (fmt,))
+    log.info('mixer 实际格式: 频率=%d 采样=%d位 声道=%d', fmt[0], fmt[1], fmt[2])
     return pygame
 
 

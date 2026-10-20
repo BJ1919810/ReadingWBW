@@ -285,7 +285,6 @@ def check_playback_fidelity(max_err=1e-3):
     这项检查是为了防住"把 float32 字节当成 int16 送进 mixer"这种错位 ——
     位深一错，听感就是"全损音质"的纯噪声，但程序不会报任何错。
     """
-    import numpy as np
     from voice_reader.audio_io import load_sound_bytes, load_audio
     pdir = paths.pack_dir(PACK)
     names = [f[:-4] for f in sorted(os.listdir(pdir))
@@ -367,6 +366,38 @@ def check_resample_fidelity(max_hf_drop=0.25, max_pitch_err=0.02):
             '检查了 %d 个 44.1k 片段' % n)
 
 
+def check_playback_duration(max_err=0.02):
+    """送进 mixer 的数据解回来后，时长必须和源文件一致。
+
+    这是防"声道数搞错"的护栏：pygame.mixer.init(48000,-16,1,512) 明明要单声道，
+    设备原生立体声时实际拿到的是 2 声道。单声道数据喂进立体声 mixer
+    会被当成 L/R 交替 -> 播放速度翻倍 -> "尖细"+"短促"。
+    这类错误不会抛任何异常，只有时长对不上才看得出来。
+    """
+    from voice_reader.audio_io import load_sound_bytes, load_audio
+    pdir = paths.pack_dir(PACK)
+    names = [f[:-4] for f in sorted(os.listdir(pdir))
+             if f.endswith('.ogg')][:20]
+    worst = 0.0
+    for ch in (1, 2):
+        for n in names:
+            p = os.path.join(pdir, n + '.ogg')
+            try:
+                raw, sr = load_sound_bytes(p, 48000, ch)
+                src, ssr = load_audio(p)
+            except Exception as exc:
+                return ('播放时长', False, '读取失败: %s' % exc, '')
+            frames = len(raw) // 2 // ch          # int16 每样本 2 字节
+            dur = frames / float(sr)
+            ref = len(src) / float(ssr)
+            if ref > 0:
+                worst = max(worst, abs(dur - ref) / ref)
+    ok = worst <= max_err
+    return ('播放时长', ok, '最大偏差 %.1f%% (阈值 %.0f%%)'
+            % (100 * worst, 100 * max_err),
+            '声道数错了会让播放速度变快/变慢，这里直接量时长')
+
+
 ALL_CHECKS = [
     ('模块导入', check_imports),
     ('静态检查', check_lint),
@@ -376,6 +407,7 @@ ALL_CHECKS = [
     ('响度一致性', check_loudness),
     ('音素级补齐', check_phoneme),
     ('播放保真', check_playback_fidelity),
+    ('播放时长', check_playback_duration),
     ('重采样保真', check_resample_fidelity),
     ('稳定性', check_stability),
 ]
