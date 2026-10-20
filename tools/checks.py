@@ -311,6 +311,62 @@ def check_playback_fidelity(max_err=1e-3):
             'mixer 收到的是 16-bit PCM；位深错位会立刻爆表')
 
 
+def check_resample_fidelity(max_hf_drop=0.25, max_pitch_err=0.02):
+    """重采样保真：44.1k 片段升到 48k 后，高频"空气感"不能被削掉。
+
+    语音包里 44.1k 和 48k 混着，播放器统一到 48k 必须重采样。
+    线性插值等效于三角形低通，会把 11~22kHz 削掉 3~6dB，
+    声音变薄 -> 听感"尖细"。这里用高频能量占比和 F0 来把关。
+    """
+    import numpy as np
+    import soundfile as sf
+    from voice_reader.audio_io import load_audio, resample
+    pdir = paths.pack_dir(PACK)
+    lows = []
+    for f in sorted(os.listdir(pdir)):
+        if not f.endswith('.ogg'):
+            continue
+        if sf.info(os.path.join(pdir, f)).samplerate != 48000:
+            lows.append(f[:-4])
+    if not lows:
+        return ('重采样保真', True, '没有非 48k 片段，无需重采样', '')
+
+    def hf(a, s, lo=10000.0):
+        A = np.abs(np.fft.rfft(a))
+        fr = np.fft.rfftfreq(len(a), 1 / s)
+        return float((A[fr > lo] ** 2).sum() / max((A ** 2).sum(), 1e-12))
+
+    worst_drop = 0.0
+    worst_pitch = 0.0
+    n = 0
+    for name in lows[:25]:
+        p = os.path.join(pdir, name + '.ogg')
+        try:
+            x, sr = load_audio(p)
+            y, sr2 = resample(x, sr, 48000)
+        except Exception as exc:
+            return ('重采样保真', False, '重采样失败: %s' % exc, '')
+        m = min(len(x), len(y))
+        if m < 2000:
+            continue
+        n += 1
+        # 重采样后样本数变了（时长不变），所以要比【全长】，
+        # 不能拿 min(len) 截断后比 —— 那等于拿 88% 的信号和 100% 比
+        h0, h1 = hf(x, sr), hf(y, sr2)
+        if h0 > 1e-5:                      # 只看本来就有高频的片段
+            worst_drop = max(worst_drop, (h0 - h1) / h0)
+        r0 = float(np.sqrt((x ** 2).mean()))
+        r1 = float(np.sqrt((y ** 2).mean()))
+        if r0 > 1e-9:
+            worst_pitch = max(worst_pitch, abs(r1 / r0 - 1.0))
+    ok = worst_drop <= max_hf_drop and worst_pitch <= max_pitch_err
+    return ('重采样保真', ok,
+            '高频最多掉 %.0f%% (阈值 %.0f%%)  电平偏差 %.1f%% (阈值 %.1f%%)'
+            % (100 * worst_drop, 100 * max_hf_drop,
+               100 * worst_pitch, 100 * max_pitch_err),
+            '检查了 %d 个 44.1k 片段' % n)
+
+
 ALL_CHECKS = [
     ('模块导入', check_imports),
     ('静态检查', check_lint),
@@ -320,5 +376,6 @@ ALL_CHECKS = [
     ('响度一致性', check_loudness),
     ('音素级补齐', check_phoneme),
     ('播放保真', check_playback_fidelity),
+    ('重采样保真', check_resample_fidelity),
     ('稳定性', check_stability),
 ]

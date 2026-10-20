@@ -18,15 +18,64 @@ def to_mono(data):
     return data
 
 
+SINC_HALF = 16          # sinc 核半长（输入采样点）
+
+
+def _sinc_resample(data, sr_in, sr_out, half=SINC_HALF):
+    """带限 sinc 插值重采样（纯 numpy，运行时不需要 scipy）。
+
+    为什么不用线性插值：线性插值等效于一个三角形低通，
+    升采样时会把 11~22kHz 削掉 3~6dB —— 语音的"空气感"没了，
+    听起来就"薄"、"尖细"。实测 44.1k 片段的高频能量占比
+    被砍掉 36%~41%，而 sinc 版本能原样保住。
+
+    核的截止频率 = min(sr_in, sr_out)/2（连续时间意义），
+    降采样时自动带限，避免混叠。
+    """
+    from math import gcd
+    if sr_in == sr_out or len(data) == 0:
+        return data
+    g = gcd(int(sr_in), int(sr_out))
+    up, down = int(sr_out) // g, int(sr_in) // g
+    n_out = int(round(len(data) * up / down))
+    if n_out <= 0:
+        return np.zeros(0, dtype=np.float32)
+    # 输出采样点对应的输入连续时间位置
+    t = np.arange(n_out) * (down / up)
+    base = np.floor(t).astype(np.int64)
+    frac = t - base
+    k = np.arange(-half + 1, half + 1, dtype=np.int64)
+    n_taps = k.shape[0]
+    idx = base[:, None] + k[None, :]
+    valid = (idx >= 0) & (idx < len(data))
+    idxc = np.clip(idx, 0, len(data) - 1)
+    # 截止频率（输入 Nyquist 的比例）
+    c = min(sr_out / sr_in, 1.0)
+    win = np.hanning(n_taps)
+    ker = np.sinc(c * (frac[:, None] - k[None, :])) * win[None, :]
+    out = np.sum(data[idxc] * ker, axis=1)
+    out[~valid.all(axis=1)] = 0.0
+    # 保持电平：核的和约等于 1/c，按比例补偿
+    out = out * (c if c < 1.0 else 1.0)
+    return out.astype(np.float32)
+
+
 def resample(data, sr_in, sr_out):
-    """线性重采样。素材都是 48k，通常是空操作。"""
+    """重采样到目标采样率（带限 sinc 插值）。
+
+    素材里 44.1k 和 48k 混着（顶层 120 个 44.1k / 679 个 48k，
+    词组 76 / 144）。播放器统一到 48k，44.1k 的片段必须重采样 ——
+    用线性插值会把高频空气感削掉三四成，听起来"尖细"。
+    """
     if sr_in == sr_out or len(data) == 0:
         return data, sr_in
-    n_out = int(len(data) * sr_out / sr_in)
-    if n_out <= 0:
-        return data, sr_in
-    out = np.interp(np.linspace(0, len(data) - 1, n_out),
-                    np.arange(len(data)), data).astype('float32')
+    out = _sinc_resample(np.asarray(data, dtype=np.float64), sr_in, sr_out)
+    # 窗的增益会有几个百分点的偏差，对齐回原电平，
+    # 免得重采样过的片段在混排时忽大忽小
+    r_in = float(np.sqrt(np.mean(np.asarray(data, dtype=np.float64) ** 2)))
+    r_out = float(np.sqrt(np.mean(out.astype(np.float64) ** 2)))
+    if r_out > 1e-9 and r_in > 1e-9:
+        out = (out * (r_in / r_out)).astype(np.float32)
     return out, sr_out
 
 

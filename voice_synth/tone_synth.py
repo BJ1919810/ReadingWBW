@@ -100,6 +100,7 @@ def analyze_f0(x, sr):
     提不出浊音帧（dio=0/45 之类），而 harvest 全部正常。
     harvest 也失败时退回 dio 的宽范围参数。
     """
+    x = np.asarray(x, dtype=np.float64)   # pyworld 要求 double
     f0, t = pw.harvest(x, sr, f0_floor=F0_FLOOR, f0_ceil=F0_CEIL,
                         frame_period=FRAME_MS)
     if int((f0 > 0).sum()) < 4:
