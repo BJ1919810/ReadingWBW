@@ -48,8 +48,8 @@ class ReaderApp:
         ttk.Button(top, text='停止', command=self.stop).pack(side='right', padx=6)
         self.start_btn = ttk.Button(top, text='开始朗读', command=self.start)
         self.start_btn.pack(side='right')
-        self.phoneme_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(top, text='音素级补齐(实验)',
+        self.phoneme_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(top, text='音素级补齐',
                         variable=self.phoneme_var).pack(side='left', padx=(12, 0))
 
         self.file_var = tk.StringVar(value='未选择文件')

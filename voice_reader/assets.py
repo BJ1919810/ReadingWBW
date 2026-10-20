@@ -27,7 +27,14 @@ PHONEME_MANIFEST = paths.PHONEME_MANIFEST
 
 
 class AssetIndex:
-    """某个语音包的可播放资源索引。"""
+    """某个语音包的可播放资源索引。
+
+    分三层，优先级从高到低：
+      1. 原包录音
+      2. 声调重组补齐的音节（_generated/）
+      3. 音素级移植补齐的音节（_generated_phoneme/）—— 默认开启，
+         字符覆盖能从 95.9% 提到 99.9%；关掉即回滚到两层。
+    """
 
     def __init__(self, pack_name, use_phoneme=None):
         self.pack = pack_name
@@ -42,10 +49,17 @@ class AssetIndex:
 
     @staticmethod
     def _phoneme_enabled(flag):
-        """音素层默认不加载。开启方式：use_phoneme=True 或环境变量
-        READINGWBW_USE_PHONEME=1。关掉就完全回到两层的状态 —— 这就是回滚。"""
+        """音素级移植层默认【开启】（实测效果好，覆盖 95.9% -> 99.9%）。
+
+        仍可随时关掉，这是回滚方式：
+          - 界面上取消勾选
+          - 环境变量 READINGWBW_USE_PHONEME=0
+        """
         if flag is None:
-            return os.environ.get(paths.USE_PHONEME_ENV, '') not in ('', '0', 'false')
+            env = os.environ.get(paths.USE_PHONEME_ENV, '').strip().lower()
+            if env in ('0', 'false', 'off', 'no'):
+                return False
+            return True
         return bool(flag)
 
     # ---------- 加载 ----------

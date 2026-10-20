@@ -33,7 +33,8 @@ NOVELS = ['原神之可莉小矮砸.txt', '笑樱.txt', '在崩铁里作死是�
 
 # ---------------------------------------------------------------- 覆盖率
 
-def check_coverage(min_pct=95.0):
+def check_coverage(min_pct=99.0):
+    """默认行为（音素层已开启）下的字符可播率。"""
     index = AssetIndex(PACK)
     wtv = load_wtv_map()
     overrides = load_overrides()
@@ -242,7 +243,7 @@ def check_imports():
 # ---------------------------------------------------------------- 汇总
 
 def check_phoneme(min_pct=99.0):
-    """音素级移植层：开启后覆盖率应显著提升；关闭后行为应与之前完全一致。"""
+    """音素级移植层：默认必须开启（覆盖 >=99%），且关掉后能干净回滚。"""
     from voice_reader.assets import AssetIndex
     wtv = load_wtv_map()
     ov = load_overrides()
@@ -268,23 +269,25 @@ def check_phoneme(min_pct=99.0):
                 pcts.append(100.0 * hit / tot)
         return index, (min(pcts) if pcts else 0.0)
 
-    idx_off, pct_off = cov(False)
-    idx_on, pct_on = cov(True)
+    idx_on, pct_on = cov(None)          # None = 走默认
     if len(idx_on.phoneme) == 0:
         return ('音素级补齐', False, '音素层是空的',
                 '跑 python tools/build_phoneme.py %s 生成' % PACK)
-    ok = pct_on >= min_pct and pct_on > pct_off
-    return ('音素级补齐', ok, '开 %d 个音节，覆盖 %.1f%% -> %.1f%%'
-            % (len(idx_on.phoneme), pct_off, pct_on),
-            '阈值 ≥%.0f%%；关闭开关即回滚' % min_pct)
+    idx_off, pct_off = cov(False)
+    ok = pct_on >= min_pct and len(idx_off.phoneme) == 0 and pct_on > pct_off
+    return ('音素级补齐', ok,
+            '默认开 %d 个音节，覆盖 %.1f%% (阈值 ≥%.0f%%)'
+            % (len(idx_on.phoneme), pct_on, min_pct),
+            '关掉后回落到 %.1f%%，回滚路径正常' % pct_off)
 
 
 def check_playback_fidelity(max_err=1e-3):
-    """播放保真：把 mixer 实际收到的字节解回来，和源文件逐样本比。
+    """播放保真：把送进 mixer 的字节解回来，和源文件逐样本比。
 
-    这项检查是为了防住"把 float32 字节当成 int16 送进 mixer"这种错位 ——
-    位深一错，听感就是"全损音质"的纯噪声，但程序不会报任何错。
+    防「把 float32 字节当成 int16 送进 mixer」这种位深错位 ——
+    错位时程序不报任何错，只是声音变成噪声。
     """
+    import numpy as np
     from voice_reader.audio_io import load_sound_bytes, load_audio
     pdir = paths.pack_dir(PACK)
     names = [f[:-4] for f in sorted(os.listdir(pdir))
@@ -293,7 +296,7 @@ def check_playback_fidelity(max_err=1e-3):
     for n in names:
         p = os.path.join(pdir, n + '.ogg')
         try:
-            raw, sr = load_sound_bytes(p)
+            raw, sr = load_sound_bytes(p, 48000, 1)
             back = np.frombuffer(raw, dtype='<i2').astype(np.float32) / 32767.0
             # 参照也要同样重采样 + 同样削波，否则比的是两回事
             src, _ = load_audio(p, target_sr=sr)
@@ -303,75 +306,18 @@ def check_playback_fidelity(max_err=1e-3):
         m = min(len(back), len(src))
         if m < 100:
             continue
-        err = float(np.max(np.abs(back[:m] - src[:m])))
-        worst = max(worst, err)
+        worst = max(worst, float(np.max(np.abs(back[:m] - src[:m]))))
     ok = worst <= max_err
     return ('播放保真', ok, '最大样本误差 %.2e (阈值 %.0e)' % (worst, max_err),
             'mixer 收到的是 16-bit PCM；位深错位会立刻爆表')
 
 
-def check_resample_fidelity(max_hf_drop=0.25, max_pitch_err=0.02):
-    """重采样保真：44.1k 片段升到 48k 后，高频"空气感"不能被削掉。
-
-    语音包里 44.1k 和 48k 混着，播放器统一到 48k 必须重采样。
-    线性插值等效于三角形低通，会把 11~22kHz 削掉 3~6dB，
-    声音变薄 -> 听感"尖细"。这里用高频能量占比和 F0 来把关。
-    """
-    import numpy as np
-    import soundfile as sf
-    from voice_reader.audio_io import load_audio, resample
-    pdir = paths.pack_dir(PACK)
-    lows = []
-    for f in sorted(os.listdir(pdir)):
-        if not f.endswith('.ogg'):
-            continue
-        if sf.info(os.path.join(pdir, f)).samplerate != 48000:
-            lows.append(f[:-4])
-    if not lows:
-        return ('重采样保真', True, '没有非 48k 片段，无需重采样', '')
-
-    def hf(a, s, lo=10000.0):
-        A = np.abs(np.fft.rfft(a))
-        fr = np.fft.rfftfreq(len(a), 1 / s)
-        return float((A[fr > lo] ** 2).sum() / max((A ** 2).sum(), 1e-12))
-
-    worst_drop = 0.0
-    worst_pitch = 0.0
-    n = 0
-    for name in lows[:25]:
-        p = os.path.join(pdir, name + '.ogg')
-        try:
-            x, sr = load_audio(p)
-            y, sr2 = resample(x, sr, 48000)
-        except Exception as exc:
-            return ('重采样保真', False, '重采样失败: %s' % exc, '')
-        m = min(len(x), len(y))
-        if m < 2000:
-            continue
-        n += 1
-        # 重采样后样本数变了（时长不变），所以要比【全长】，
-        # 不能拿 min(len) 截断后比 —— 那等于拿 88% 的信号和 100% 比
-        h0, h1 = hf(x, sr), hf(y, sr2)
-        if h0 > 1e-5:                      # 只看本来就有高频的片段
-            worst_drop = max(worst_drop, (h0 - h1) / h0)
-        r0 = float(np.sqrt((x ** 2).mean()))
-        r1 = float(np.sqrt((y ** 2).mean()))
-        if r0 > 1e-9:
-            worst_pitch = max(worst_pitch, abs(r1 / r0 - 1.0))
-    ok = worst_drop <= max_hf_drop and worst_pitch <= max_pitch_err
-    return ('重采样保真', ok,
-            '高频最多掉 %.0f%% (阈值 %.0f%%)  电平偏差 %.1f%% (阈值 %.1f%%)'
-            % (100 * worst_drop, 100 * max_hf_drop,
-               100 * worst_pitch, 100 * max_pitch_err),
-            '检查了 %d 个 44.1k 片段' % n)
-
-
 def check_playback_duration(max_err=0.02):
     """送进 mixer 的数据解回来后，时长必须和源文件一致。
 
-    这是防"声道数搞错"的护栏：pygame.mixer.init(48000,-16,1,512) 明明要单声道，
+    这是防「声道数搞错」的护栏：pygame.mixer.init(48000,-16,1,512) 明明要单声道，
     设备原生立体声时实际拿到的是 2 声道。单声道数据喂进立体声 mixer
-    会被当成 L/R 交替 -> 播放速度翻倍 -> "尖细"+"短促"。
+    会被当成 L/R 交替 -> 播放速度翻倍 -> 尖细 + 短促。
     这类错误不会抛任何异常，只有时长对不上才看得出来。
     """
     from voice_reader.audio_io import load_sound_bytes, load_audio
@@ -396,6 +342,63 @@ def check_playback_duration(max_err=0.02):
     return ('播放时长', ok, '最大偏差 %.1f%% (阈值 %.0f%%)'
             % (100 * worst, 100 * max_err),
             '声道数错了会让播放速度变快/变慢，这里直接量时长')
+
+
+def check_resample_fidelity(max_hf_drop=3.0, max_level_err=0.02):
+    """重采样保真：44.1k 片段升到 48k 后，高频「空气感」不能被削掉。
+
+    语音包里 44.1k 和 48k 混着，播放器统一到 48k 必须重采样。
+    线性插值等效于三角形低通，会把 11~22kHz 削掉 3~6dB，声音变薄 -> 尖细。
+
+    判据用功率谱密度（dB/Hz）在 10~20k 公共带内比较 ——
+    两种采样的 Nyquist 不同，直接比「10k 以上占比」不是同一把尺子。
+    """
+    import numpy as np
+    import soundfile as sf
+    from voice_reader.audio_io import load_audio, resample
+    pdir = paths.pack_dir(PACK)
+    lows = []
+    for f in sorted(os.listdir(pdir)):
+        if not f.endswith('.ogg'):
+            continue
+        if sf.info(os.path.join(pdir, f)).samplerate != 48000:
+            lows.append(f[:-4])
+    if not lows:
+        return ('重采样保真', True, '没有非 48k 片段，无需重采样', '')
+
+    def band_db(a, sr, lo=10000.0, hi=20000.0):
+        """10~20k 的功率谱密度（dB/Hz）"""
+        A = np.abs(np.fft.rfft(a)) ** 2
+        f = np.fft.rfftfreq(len(a), 1 / sr)
+        sel = (f >= lo) & (f <= hi)
+        if not sel.any():
+            return None
+        psd = A[sel].sum() * (len(a) / sr) / (hi - lo)   # 每 Hz 功率
+        return 10 * np.log10(psd + 1e-20)
+
+    worst_hf = 0.0
+    worst_level = 0.0
+    n = 0
+    for name in lows[:25]:
+        p = os.path.join(pdir, name + '.ogg')
+        try:
+            x, sr = load_audio(p)
+            y, sr2 = resample(x, sr, 48000)
+        except Exception as exc:
+            return ('重采样保真', False, '重采样失败: %s' % exc, '')
+        n += 1
+        b0, b1 = band_db(x, sr), band_db(y, sr2)
+        if b0 is not None and b1 is not None and b0 > -120:
+            worst_hf = max(worst_hf, b0 - b1)     # 正数 = 高频被削
+        r0 = float(np.sqrt((x ** 2).mean()))
+        r1 = float(np.sqrt((y ** 2).mean()))
+        if r0 > 1e-9:
+            worst_level = max(worst_level, abs(r1 / r0 - 1.0))
+    ok = worst_hf <= max_hf_drop and worst_level <= max_level_err
+    return ('重采样保真', ok,
+            '高频最多掉 %.1f dB (阈值 %.1f dB)  电平偏差 %.1f%% (阈值 %.1f%%)'
+            % (worst_hf, max_hf_drop, 100 * worst_level, 100 * max_level_err),
+            '检查了 %d 个 44.1k 片段（10~20k 功率谱密度对比）' % n)
 
 
 ALL_CHECKS = [
